@@ -9,6 +9,7 @@
     "ruff.lint.enable": true,
     "cSpell.enabled": true,
     "cSpell.words": [
+        "Anker",
         "Solix",
         "stringifying"
     ],
