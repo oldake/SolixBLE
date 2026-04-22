@@ -493,7 +493,9 @@ class SolixBLEDevice:
         )
         return cipher.encrypt(padded_data)
 
-    async def _process_telemetry_packet(self, payload: bytes, cmd: bytes = None) -> None:
+    async def _process_telemetry_packet(
+        self, payload: bytes, cmd: bytes = None
+    ) -> None:
         """Process a telemetry packet from the device.
 
         This performs the default processing of telemetry packets in which
@@ -533,14 +535,12 @@ class SolixBLEDevice:
             )
             del self._fragment_buffers[cmd_key]
             del self._fragment_totals[cmd_key]
-            _LOGGER.debug(
-                f"Reassembled payload: {len(payload)} bytes"
-            )
+            _LOGGER.debug(f"Reassembled payload: {len(payload)} bytes")
 
         else:
             # Strip fragment info
             payload = payload[1:]
-        
+
         decrypted_payload = self._decrypt_payload(payload)
         _LOGGER.debug(f"Decrypted payload: {decrypted_payload.hex()}")
         parameters = self._parse_payload(decrypted_payload)
@@ -615,26 +615,45 @@ class SolixBLEDevice:
         # Match against common message types
         match pattern.hex():
 
-            # Encryption negotiation
+            # Negotiation messages
             case "030001":
                 _LOGGER.debug("Received encryption negotiation message!")
                 return await self._process_negotiation(cmd, payload)
 
-            # Encrypted messages
+            # Session messages
             case "03010f" | "030111":
 
                 match cmd.hex():
 
-                    # Telemetry messages
+                    # Non-encrypted telemetry messages
+                    case "0300":
+                        _LOGGER.debug("Received non-encrypted telemetry message!")
+                        parameters = self._parse_payload(payload)
+                        return await self._process_telemetry(parameters)
+
+                    # Encrypted telemetry messages
                     case "c402" | "4300" | "c405":
-                        _LOGGER.debug("Received telemetry message!")
+                        _LOGGER.debug("Received encrypted telemetry message!")
                         return await self._process_telemetry_packet(payload, cmd)
 
                     # Unknown messages
                     case _:
                         _LOGGER.debug(f"Received unknown message of type: {cmd.hex()}")
-                        try:
 
+                        # Try to parse the message as if it were not encrypted
+                        try:
+                            parameters = self._parse_payload(payload)
+                            _LOGGER.debug(
+                                f"Non-encrypted parameters: {self._parameters_to_str(parameters, types=True)}"
+                            )
+                            return
+                        except Exception:
+                            _LOGGER.exception(
+                                "Failed to parse unknown payload using no encryption approach"
+                            )
+
+                        # Else lets try to decrypt it
+                        try:
                             # If the payload is one byte too short and we are
                             # using the default AES (CBC) then try putting the
                             # last byte of the cmd in front of it
@@ -656,6 +675,7 @@ class SolixBLEDevice:
                             _LOGGER.debug(
                                 f"Parameters: {self._parameters_to_str(parameters, types=True)}"
                             )
+                            return
                         except Exception:
                             _LOGGER.exception(
                                 "Exception decrypting unknown message type"
